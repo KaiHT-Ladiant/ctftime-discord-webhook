@@ -20,6 +20,8 @@ SEEN_PATH = Path(__file__).resolve().parent / "data" / "seen_events.json"
 DEFAULT_LOOKAHEAD_DAYS = 90
 DEFAULT_TIMEZONE = "Asia/Seoul"
 DEFAULT_LIMIT = 100
+# Soft red accent, close to common CTFtime branding
+EMBED_COLOR = 0xE74C3C
 
 
 def env_int(name: str, default: int) -> int:
@@ -90,31 +92,43 @@ def format_local_time(iso_value: str, tz_name: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     local = dt.astimezone(ZoneInfo(tz_name))
-    # Match previous Zapier style: Jul 26, 2025 04:00AM
-    return local.strftime("%b %d, %Y %I:%M%p").replace("AM", "AM").replace("PM", "PM")
+    return local.strftime("%b %d, %Y %I:%M%p")
 
 
-def build_message(event: dict, tz_name: str) -> str:
+def build_embed(event: dict, tz_name: str) -> dict:
     title = event.get("title") or "Untitled CTF"
     start = format_local_time(event["start"], tz_name)
     end = format_local_time(event["finish"], tz_name)
-    url = event.get("ctftime_url") or event.get("url") or "(no url)"
+    ctftime_url = (event.get("ctftime_url") or "").strip()
+    event_url = (event.get("url") or "").strip()
+    link = ctftime_url or event_url
+    logo = (event.get("logo") or "").strip()
 
-    return (
-        "`New CTF Time!`\n"
-        f"| CTF Title : {title}\n"
-        "|\n"
-        f"| Start Time : {start}\n"
-        f"| End Time : {end}\n"
-        "|\n"
-        f"| CTF URL : {url}\n"
-        "------------------------------------"
-    )
+    fields = [
+        {"name": "CTF Title", "value": title, "inline": False},
+        {"name": "Start Time", "value": f"`{start}`", "inline": True},
+        {"name": "End Time", "value": f"`{end}`", "inline": True},
+    ]
+    if link:
+        fields.append({"name": "CTF URL", "value": link, "inline": False})
+
+    embed: dict = {
+        "title": "New CTF Time!",
+        "color": EMBED_COLOR,
+        "fields": fields,
+        "footer": {"text": "CTFtime"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if link:
+        embed["url"] = link
+    if logo.startswith("http"):
+        embed["thumbnail"] = {"url": logo}
+    return embed
 
 
-def post_to_discord(webhook_url: str, content: str) -> None:
+def post_to_discord(webhook_url: str, embed: dict) -> None:
     # Discord incoming webhooks are rate-limited; space posts out a bit.
-    http_post_json(webhook_url, {"content": content})
+    http_post_json(webhook_url, {"embeds": [embed]})
     time.sleep(1.2)
 
 
@@ -148,9 +162,9 @@ def main() -> int:
 
     posted = 0
     for event in new_events:
-        message = build_message(event, tz_name)
+        embed = build_embed(event, tz_name)
         try:
-            post_to_discord(webhook_url, message)
+            post_to_discord(webhook_url, embed)
             seen.add(int(event["id"]))
             posted += 1
             print(f"Posted: {event.get('title')} (id={event['id']})")
