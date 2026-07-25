@@ -1,0 +1,51 @@
+name: CTFtime Discord Notify
+
+on:
+  schedule:
+    # Every hour (UTC). GitHub can delay scheduled jobs by a few minutes.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: "Record current events without posting (first-time setup)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TIMEZONE: Asia/Seoul
+          LOOKAHEAD_DAYS: "90"
+          BOOTSTRAP: ${{ github.event.inputs.bootstrap || 'false' }}
+        run: python notify.py
+
+      - name: Commit seen event state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/seen_events.json
+          if git diff --staged --quiet; then
+            echo "No state changes to commit."
+          else
+            git commit -m "chore: update notified CTFtime events"
+            git push
+          fi
